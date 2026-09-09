@@ -1,1 +1,11 @@
+os
+json
+numpy
+pandas
+tempfile
+
+
+
 gradio
+plotly
+huggingface_hub
