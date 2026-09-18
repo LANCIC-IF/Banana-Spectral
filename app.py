@@ -7,6 +7,7 @@ from PIL import Image
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import gradio as gr
+import gc
 
 # --- 1. Define Local Paths ---
 BASE_DIR = os.path.dirname(__file__) if "__file__" in locals() else os.getcwd()
@@ -77,30 +78,39 @@ def extract_data_type2(db):
 
 # --- 3. Initial Data Loading and Processing ---
 print("Loading databases locally...")
-loaded_databases = load_json_databases(DB_FOLDER)
-
 all_extracted_spectral_data = {}
-print("\nExtracting data from loaded databases:")
-for db_name, db_content in loaded_databases.items():
-    hierarchy_type = detect_hierarchy_type(db_content)
-    extracted_list = []
-    if hierarchy_type == 'Tipo 1':
-        extracted_list = extract_data_type1(db_content)
-    elif hierarchy_type == 'Tipo 2':
-        extracted_list = extract_data_type2(db_content)
-    else:
-        print(f"Skipped '{db_name}': Unknown hierarchy type during data extraction.")
-
-    if extracted_list:
-        all_extracted_spectral_data[db_name] = extracted_list
-
 combined_spectral_data = []
-for db_name, data_list in all_extracted_spectral_data.items():
-    for material in data_list:
-        material_with_source = material.copy()
-        material_with_source['source_database'] = db_name
-        combined_spectral_data.append(material_with_source)
-print(f"Combined data from all databases. Total materials: {len(combined_spectral_data)}")
+
+if os.path.exists(DB_FOLDER):
+    json_files = [f for f in os.listdir(DB_FOLDER) if f.endswith('.json')]
+    for filename in json_files:
+        filepath = os.path.join(DB_FOLDER, filename)
+        try:
+            with open(filepath, 'r', encoding='utf-8') as f:
+                db_content = json.load(f)
+            
+            hierarchy_type = detect_hierarchy_type(db_content)
+            extracted_list = []
+            if hierarchy_type == 'Tipo 1':
+                extracted_list = extract_data_type1(db_content)
+            elif hierarchy_type == 'Tipo 2':
+                extracted_list = extract_data_type2(db_content)
+            
+            if extracted_list:
+                all_extracted_spectral_data[filename] = extracted_list
+                for material in extracted_list:
+                    mat_copy = material.copy()
+                    mat_copy['source_database'] = filename
+                    combined_spectral_data.append(mat_copy)
+            
+            # Liberar la memoria RAM del archivo pesado inmediatamente
+            del db_content
+            gc.collect()
+            print(f"  - Procesado y liberado de RAM: '{filename}'")
+        except Exception as e:
+            print(f"  - Error al cargar '{filename}': {e}")
+
+print(f"Procesamiento completo. Total de materiales: {len(combined_spectral_data)}")
 
 # Load logo image
 try:
@@ -316,7 +326,7 @@ def query_search_interface(query):
         return fig
 
 def get_database_names():
-    return list(loaded_databases.keys())
+    return list(all_extracted_spectral_data.keys())
 
 def get_materials_from_db(db_name):
     materials = []
