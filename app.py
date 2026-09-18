@@ -7,73 +7,41 @@ from PIL import Image
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import gradio as gr
-from huggingface_hub import hf_hub_download
-from huggingface_hub import HfApi
 
-# --- 1. Define Paths (Adjusted for Hugging Face Space structure) ---
-# Identificador exacto de tu Dataset en Hugging Face
-DATASET_REPO = "LANCIC-IF-UNAM/Banana-Spectral-DB"
-logo_image_path = 'banana spectral.jpeg'
-
-# Lista de archivos a descargar
-ARCHIVOS_JSON = [
-    "Complete_splib07a.json",
-    "Complete_splib07b.json",
-    "Complete_splib07b_cvASD.json",
-    "database_200to1000_pigmentcheker.json",
-    "database_NIR_pigmentcheker1.json",
-    "database_pigmentcheker1.json"
-]
+# --- 1. Define Local Paths ---
+BASE_DIR = os.path.dirname(__file__) if "__file__" in locals() else os.getcwd()
+DB_FOLDER = os.path.join(BASE_DIR, "Databases")
+logo_image_path = os.path.join(BASE_DIR, "banana spectral.jpeg")
 
 # --- 2. Data Loading and Processing Functions ---
-def load_json_databases(base_path):
+def load_json_databases(folder_path):
     """
-    Loads all JSON files from a specified Hugging Face Dataset repo into a dictionary.
-    Args:
-        base_path (str): HF Dataset repo ID (e.g., 'LANCIC-IF/bd-laboratorio').
-    Returns:
-        dict: A dictionary where keys are filenames and values are the loaded JSON data.
+    Loads all JSON files directly from the local Databases directory into a dictionary.
     """
     loaded_databases = {}
-    token = os.getenv("HF_TOKEN")
-
-    try:
-        api = HfApi()
-        all_files = api.list_repo_files(repo_id=base_path, repo_type="dataset", token=token)
-        json_files = [f for f in all_files if f.endswith('.json')]
-    except Exception as e:
-        print(f"HF Dataset not found '{base_path}': {e}")
+    
+    if not os.path.exists(folder_path):
+        print(f"Error: Directory '{folder_path}' not found.")
         return loaded_databases
 
+    json_files = [f for f in os.listdir(folder_path) if f.endswith('.json')]
+
     for filename in json_files:
+        filepath = os.path.join(folder_path, filename)
         try:
-            filepath = hf_hub_download(
-                repo_id=base_path,
-                filename=filename,
-                repo_type="dataset",
-                token=token
-            )
             with open(filepath, 'r', encoding='utf-8') as f:
                 data = json.load(f)
                 loaded_databases[filename] = data
-            print(f"  - Loaded '{filename}'")
+            print(f"  - Loaded '{filename}' locally")
         except Exception as e:
             print(f"  - Error loading '{filename}': {e}")
 
     return loaded_databases
 
 def detect_hierarchy_type(db):
-    """
-    Detects whether a loaded JSON database follows 'Tipo 1' or 'Tipo 2' hierarchy.
-    Args:
-        db (dict): A loaded JSON database.
-    Returns:
-        str: 'Tipo 2', 'Tipo 1', or 'Unknown'.
-    """
     if not isinstance(db, dict) or not db:
         return 'Unknown'
 
-    # Check for Hierarchy Type 2
     first_level_value = next(iter(db.values()), None)
     if isinstance(first_level_value, dict) and first_level_value:
         second_level_value = next(iter(first_level_value.values()), None)
@@ -81,7 +49,6 @@ def detect_hierarchy_type(db):
             if all(k in second_level_value for k in ['minor_wavelength', 'major_wavelength', 'reflectance']):
                 return 'Tipo 2'
 
-    # Check for Hierarchy Type 1
     if isinstance(first_level_value, dict):
         if all(k in first_level_value for k in ['minor_wavelength', 'major_wavelength', 'reflectance']):
             return 'Tipo 1'
@@ -89,12 +56,6 @@ def detect_hierarchy_type(db):
     return 'Unknown'
 
 def extract_data_type1(db):
-    """
-    Extracts spectral data and other relevant information from a 'Tipo 1' database.
-    Returns:
-        list: A list of dictionaries, where each dictionary represents a material
-              with its extracted properties.
-    """
     extracted_data = []
     for material_name, properties in db.items():
         material_info = {'name': material_name}
@@ -104,12 +65,6 @@ def extract_data_type1(db):
     return extracted_data
 
 def extract_data_type2(db):
-    """
-    Extracts spectral data and other relevant information from a 'Tipo 2' database.
-    Returns:
-        list: A list of dictionaries, where each dictionary represents a material
-              with its extracted properties.
-    """
     extracted_data = []
     for category, category_data in db.items():
         if isinstance(category_data, dict):
@@ -120,9 +75,9 @@ def extract_data_type2(db):
                 extracted_data.append(material_info)
     return extracted_data
 
-# --- 3. Initial Data Loading and Processing for the App ---
-print("Loading databases...")
-loaded_databases = load_json_databases(DATASET_REPO)
+# --- 3. Initial Data Loading and Processing ---
+print("Loading databases locally...")
+loaded_databases = load_json_databases(DB_FOLDER)
 
 all_extracted_spectral_data = {}
 print("\nExtracting data from loaded databases:")
@@ -145,24 +100,18 @@ for db_name, data_list in all_extracted_spectral_data.items():
         material_with_source = material.copy()
         material_with_source['source_database'] = db_name
         combined_spectral_data.append(material_with_source)
-print(f"Combined data from all databases into a single list. Total materials: {len(combined_spectral_data)}")
+print(f"Combined data from all databases. Total materials: {len(combined_spectral_data)}")
 
 # Load logo image
 try:
     logo_image = Image.open(logo_image_path)
     print(f"Logo image loaded successfully from {logo_image_path}.")
-except FileNotFoundError:
-    print(f"Error: The file was not found at {logo_image_path}. Displaying placeholder.")
-    logo_image = None # Set to None or a placeholder if loading fails
 except Exception as e:
-    print(f"An error occurred while loading the logo image: {e}. Displaying placeholder.")
+    print(f"Notice: Logo image not loaded: {e}. Using placeholder.")
     logo_image = None
 
 # --- 4. Core Application Functions ---
 def search_database(combined_data, query):
-    """
-    Searches for materials in the combined spectral data based on a query string.
-    """
     results = []
     lower_query = query.lower()
     for material in combined_data:
@@ -181,10 +130,6 @@ def search_database(combined_data, query):
     return results
 
 def plot_spectral_data_from_query_results(materials_to_plot):
-    """
-    Generates a list of Plotly figures, where each figure displays the spectral data
-    (reflectance vs. wavelength) for a single material.
-    """
     figures = []
     for material in materials_to_plot:
         material_name = material.get('name', 'Unknown Material')
@@ -194,7 +139,6 @@ def plot_spectral_data_from_query_results(materials_to_plot):
         source_database = material.get('source_database', 'N/A')
 
         if minor_wavelength_um is None or major_wavelength_um is None or reflectance is None:
-            print(f"Skipping '{material_name}' from '{source_database}' due to missing wavelength or reflectance data.")
             continue
         try:
             no_conversion_dbs = [
@@ -209,7 +153,6 @@ def plot_spectral_data_from_query_results(materials_to_plot):
                 minor_wavelength_nm = float(minor_wavelength_um) * 1000
                 major_wavelength_nm = float(major_wavelength_um) * 1000
         except ValueError:
-            print(f"Skipping '{material_name}' from '{source_database}' due to invalid wavelength format.")
             continue
         reflectance_array = np.array(reflectance, dtype=float)
         if len(reflectance_array) > 1:
@@ -217,7 +160,6 @@ def plot_spectral_data_from_query_results(materials_to_plot):
         elif len(reflectance_array) == 1:
             wavelengths_nm = np.array([minor_wavelength_nm])
         else:
-            print(f"Skipping '{material_name}' from '{source_database}' due to empty reflectance data.")
             continue
         fig = go.Figure()
         fig.add_trace(go.Scatter(
@@ -237,10 +179,6 @@ def plot_spectral_data_from_query_results(materials_to_plot):
     return figures
 
 def plot_single_material_spectrum(material_to_plot):
-    """
-    Generates a single Plotly figure displaying the spectral data
-    (reflectance vs. wavelength) for a *single* material.
-    """
     fig = go.Figure()
     if not material_to_plot:
         fig.update_layout(title='No se encontraron datos para graficar', xaxis_title='Longitud de Onda (nm)', yaxis_title='Reflectancia')
@@ -252,7 +190,7 @@ def plot_single_material_spectrum(material_to_plot):
     source_database = material_to_plot.get('source_database', 'N/A')
 
     if minor_wavelength_um is None or major_wavelength_um is None or reflectance is None:
-        fig.update_layout(title=f'Error al graficar {material_name} (Faltan datos)', xaxis_title='Longitud de Onda (nm)', yaxis_yaxis_title='Reflectancia')
+        fig.update_layout(title=f'Error al graficar {material_name} (Faltan datos)', xaxis_title='Longitud de Onda (nm)', yaxis_title='Reflectancia')
         return fig
     try:
         no_conversion_dbs = [
@@ -290,17 +228,11 @@ def plot_single_material_spectrum(material_to_plot):
         title=f'Espectro de Reflectancia: {material_name} (Origen: {source_database})',
         xaxis_title='Longitud de Onda (nm)',
         yaxis_title='Reflectancia',
-        hovermode='x unified',
-        xaxis_tickformat=' ',
-        yaxis_tickformat=''
+        hovermode='x unified'
     )
     return fig
 
 def combine_plotly_figures_traces(list_of_figures, title="Resultados de la Búsqueda por Consulta"):
-    """
-    Combines traces from a list of Plotly figures into a single Plotly figure with subplots,
-    where each subplot displays a single material's spectrum.
-    """
     if not list_of_figures:
         fig = go.Figure()
         fig.update_layout(
@@ -333,9 +265,6 @@ def combine_plotly_figures_traces(list_of_figures, title="Resultados de la Búsq
     return fig
 
 def export_spectral_data_to_csv(material):
-    """
-    Converts a single material's spectral data (wavelength and reflectance) into a CSV string.
-    """
     material_name = material.get('name', 'unknown_material')
     minor_wavelength_um = material.get('minor_wavelength')
     major_wavelength_um = material.get('major_wavelength')
@@ -370,21 +299,15 @@ def export_spectral_data_to_csv(material):
         'Wavelength_nm': wavelengths_nm,
         'Reflectance': reflectance_array
     })
-    csv_string = df.to_csv(index=False)
-    return csv_string
+    return df.to_csv(index=False)
 
 # --- 5. Gradio Interface Functions ---
 def query_search_interface(query):
-    """
-    Searches the combined spectral database for materials matching the query
-    and generates a single Plotly figure for the found materials, combining their traces.
-    """
     found_materials = search_database(combined_spectral_data, query)
     if found_materials:
         materials_to_plot = found_materials[:10]
         individual_figures = plot_spectral_data_from_query_results(materials_to_plot)
-        combined_figure = combine_plotly_figures_traces(individual_figures)
-        return combined_figure
+        return combine_plotly_figures_traces(individual_figures)
     else:
         fig = go.Figure()
         fig.update_layout(title=f"No se encontraron materiales para la consulta: {query}",
@@ -393,15 +316,9 @@ def query_search_interface(query):
         return fig
 
 def get_database_names():
-    """
-    Returns a list of database names available in `loaded_databases`.
-    """
     return list(loaded_databases.keys())
 
 def get_materials_from_db(db_name):
-    """
-    Retrieves a list of material names for a given database.
-    """
     materials = []
     if db_name in all_extracted_spectral_data:
         for material_data in all_extracted_spectral_data[db_name]:
@@ -409,10 +326,6 @@ def get_materials_from_db(db_name):
     return gr.update(choices=materials, value=None)
 
 def browse_and_plot_material_interface(db_name, material_name):
-    """
-    Finds a specific material within a database from `combined_spectral_data`
-    and plots its spectral data, also extracting and returning additional metadata.
-    """
     found_material = None
     for material in combined_spectral_data:
         if material.get('source_database') == db_name and material.get('name') == material_name:
@@ -434,10 +347,6 @@ def browse_and_plot_material_interface(db_name, material_name):
         return empty_fig, "No se encontró el material seleccionado en la base de datos."
 
 def export_selected_material_csv(db_name, material_name):
-    """
-    Generates a temporary CSV file for a selected material from a specific database
-    and returns its path for Gradio's DownloadButton.
-    """
     found_material = None
     for material in combined_spectral_data:
         if material.get('source_database') == db_name and material.get('name') == material_name:
@@ -446,7 +355,6 @@ def export_selected_material_csv(db_name, material_name):
     if found_material:
         csv_string = export_spectral_data_to_csv(found_material)
         if csv_string:
-            filename_base = f"{material_name.replace(' ', '_').replace('/', '-')}_spectral_data"
             with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.csv', encoding='utf-8') as tmp_file:
                 tmp_file.write(csv_string)
             return tmp_file.name, "¡Exportado correctamente! Haga clic en el botón 'Descargar CSV' para bajar el archivo."
@@ -457,23 +365,10 @@ def export_selected_material_csv(db_name, material_name):
 
 # --- 6. Gradio App Layout ---
 with gr.Blocks(title="Spectral Data Explorer") as demo:
-    # Load logo image for display
-    if os.path.exists(logo_image_path):
-        try:
-            logo_image = Image.open(logo_image_path)
-        except Exception as e:
-            print(f"An error occurred while loading the logo image: {e}. Displaying placeholder.")
-            logo_image = None
-    else:
-        print(f"Logo image not found at {logo_image_path}. Displaying placeholder.")
-        logo_image = None
-
     if logo_image:
         gr.Image(logo_image, label="Banana Spectral Database Explorer", show_label=True, height=100)
     else:
-        gr.Markdown("# Banana Spectral Database Explorer (Logo Missing or Error)")
-
-    gr.Markdown("# Banana Spectral Database Explorer")
+        gr.Markdown("# Banana Spectral Database Explorer")
 
     with gr.Tab("Búsqueda por Consulta"):
         with gr.Column():
@@ -528,8 +423,7 @@ with gr.Blocks(title="Spectral Data Explorer") as demo:
             outputs=[csv_file_output, export_status_message]
         )
 
-demo.launch()
-
-
+# --- 7. Execution Block for Cloud Deployment (Koyeb Dynamic Port) ---
 if __name__ == "__main__":
-    demo.launch()
+    port = int(os.environ.get("PORT", 7860))
+    demo.launch(server_name="0.0.0.0", server_port=port, share=True)
