@@ -12,7 +12,7 @@ from huggingface_hub import HfApi
 
 # --- 1. Define Paths (Adjusted for Hugging Face Space structure) ---
 # Identificador exacto de tu Dataset en Hugging Face
-DATASET_REPO = "LANCIC-IF-UNAM/Banana-Spectral-DB"
+DATASET_REPO = "LichiRMN/BananaSpectral-DB"
 logo_image_path = 'banana spectral.jpeg'
 
 # Lista de archivos a descargar
